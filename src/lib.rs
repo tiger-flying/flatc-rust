@@ -92,6 +92,7 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs::DirEntry;
 use std::io;
@@ -304,6 +305,26 @@ pub use self::{}::*;
         }
     }
 
+    fn list_flatbuffers_files(&self, path: &Path) -> HashSet<PathBuf> {
+        let mut fbs_files = HashSet::<PathBuf>::new();
+        if path.is_file() {
+            let ext = path.extension();
+            if let Some(ext) = ext {
+                if ext == "fbs" {
+                    fbs_files.insert(path.into());
+                }
+            }
+        } else if path.is_dir() {
+            for entry in std::fs::read_dir(path).unwrap() {
+                if let Ok(entry) = entry {
+                    fbs_files.extend(self.list_flatbuffers_files(&entry.path()));
+                }
+            }
+        }
+
+        fbs_files
+    }
+
     /// Execute configured `flatc` with given args
     pub fn run(&self, args: Args) -> Result<()> {
         let mut cmd_args: Vec<OsString> = Vec::new();
@@ -362,7 +383,13 @@ pub use self::{}::*;
             return Err(err_other("input is empty"));
         }
 
-        cmd_args.extend(args.inputs.iter().map(|input| input.into()));
+        let mut expanded_inputs = HashSet::<PathBuf>::new();
+
+        for input in args.inputs.iter() {
+            expanded_inputs.extend(self.list_flatbuffers_files(input));
+        }
+
+        cmd_args.extend(expanded_inputs.iter().map(|input| input.into()));
 
         self.run_with_args(cmd_args)?;
 
