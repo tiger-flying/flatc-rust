@@ -389,6 +389,11 @@ pub use self::{}::*;
             expanded_inputs.extend(self.list_flatbuffers_files(input));
         }
 
+        // rerun build.rs after any fbs file changed
+        for input in expanded_inputs.iter() {
+            println!("cargo:rerun-if-changed={}", &input.display());
+        }
+
         cmd_args.extend(expanded_inputs.iter().map(|input| input.into()));
 
         self.run_with_args(cmd_args)?;
