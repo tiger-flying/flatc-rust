@@ -405,28 +405,36 @@ pub use self::{}::*;
             // flatc has a bug that can not generate right mod.rs if pass in multiple flatbuffers files
             // Reference: https://github.com/google/flatbuffers/issues/8096
             // re-generate mod.rs manually
-            for entry in std::fs::read_dir(out_dir).unwrap() {
-                if let Ok(entry) = entry {
-                    if let Ok(metadata) = entry.metadata() {
-                        if metadata.is_dir() {
-                            let snippet = self.generate_mod_rs_data_for_dir(&entry);
-                            if let Ok(snippet) = snippet {
-                                mod_rs_snippets.push(snippet);
-                            } else {
-                                warn!("failed to generate mod.rs data for {:?}", entry.path());
-                            }
-                        } else if metadata.is_file() {
-                            if entry.path().ends_with(".rs")
-                                && entry.file_name() != OsString::from("mod.rs")
-                            {
-                                warn!("--rust-module-root-file was set but some modules are not generated to separate directories, this should not happen!")
-                            }
+            for entry in std::fs::read_dir(out_dir).unwrap().flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.is_dir() {
+                        let snippet = self.generate_mod_rs_data_for_dir(&entry);
+                        if let Ok(snippet) = snippet {
+                            mod_rs_snippets.push(snippet);
+                        } else {
+                            warn!("failed to generate mod.rs data for {:?}", entry.path());
                         }
+                    } else if metadata.is_file()
+                        && entry.path().ends_with(".rs")
+                        && entry.file_name() != "mod.rs"
+                    {
+                        warn!("--rust-module-root-file was set but some modules are not generated to separate directories, this should not happen!")
                     }
                 }
             }
 
-            _ = std::fs::write(&format!("{}/mod.rs", out_dir), mod_rs_snippets.concat());
+            let mod_rs_path = format!("{}/mod.rs", out_dir);
+            let new_content = mod_rs_snippets.concat();
+
+            // Only write if content has changed
+            if let Ok(existing_content) = std::fs::read_to_string(&mod_rs_path) {
+                if existing_content != new_content {
+                    _ = std::fs::write(&mod_rs_path, new_content);
+                }
+            } else {
+                // File doesn't exist, write it
+                _ = std::fs::write(&mod_rs_path, new_content);
+            }
         }
 
         Ok(())
