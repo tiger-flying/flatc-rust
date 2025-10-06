@@ -99,6 +99,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process;
 
+use filetime::FileTime;
 use log::{info, warn};
 
 /// The default Error type of the crate
@@ -110,7 +111,7 @@ fn err_other<E>(error: E) -> Error
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    Error::new(io::ErrorKind::Other, error)
+    Error::other(error)
 }
 
 /// This structure represents the arguments passed to `flatc`
@@ -270,9 +271,7 @@ use super::*;
                         if file_path.is_file() {
                             let file_ext = file_path.extension();
                             if let Some(file_ext) = file_ext {
-                                if (file_ext == "rs")
-                                    && (file.file_name() != OsString::from("mod.rs"))
-                                {
+                                if (file_ext == "rs") && (file.file_name() != "mod.rs") {
                                     // FIXME(Rex): file name might contain non-unicode characters
                                     let file_name_without_ext = file_path.file_stem().unwrap();
                                     let file_name_without_ext =
@@ -294,14 +293,12 @@ pub use self::{}::*;
 
                 mod_rs_snippet.push_str("}\n");
 
-                return Ok(mod_rs_snippet);
+                Ok(mod_rs_snippet)
             }
-            Err(os_str) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("{:?} is not unicode encoded", os_str),
-                ));
-            }
+            Err(os_str) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{:?} is not unicode encoded", os_str),
+            )),
         }
     }
 
@@ -315,10 +312,8 @@ pub use self::{}::*;
                 }
             }
         } else if path.is_dir() {
-            for entry in std::fs::read_dir(path).unwrap() {
-                if let Ok(entry) = entry {
-                    fbs_files.extend(self.list_flatbuffers_files(&entry.path()));
-                }
+            for entry in std::fs::read_dir(path).unwrap().flatten() {
+                fbs_files.extend(self.list_flatbuffers_files(&entry.path()));
             }
         }
 
@@ -371,12 +366,10 @@ pub use self::{}::*;
         }
 
         cmd_args.push("-o".into());
-        let out_dir = args.out_dir.to_str().ok_or_else(|| {
-            Error::new(
-                io::ErrorKind::Other,
-                "only UTF-8 convertable paths are supported",
-            )
-        })?;
+        let out_dir = args
+            .out_dir
+            .to_str()
+            .ok_or_else(|| Error::other("only UTF-8 convertable paths are supported"))?;
         cmd_args.push(out_dir.into());
 
         if args.inputs.is_empty() {
@@ -395,6 +388,19 @@ pub use self::{}::*;
         }
 
         cmd_args.extend(expanded_inputs.iter().map(|input| input.into()));
+
+        // Store original mod.rs content and metadata before running flatc
+        let mod_rs_path = format!("{}/mod.rs", out_dir);
+        let original_mod_rs = if gen_modules_in_separate_dirs {
+            std::fs::read_to_string(&mod_rs_path).ok()
+        } else {
+            None
+        };
+        let original_metadata = if gen_modules_in_separate_dirs {
+            std::fs::metadata(&mod_rs_path).ok()
+        } else {
+            None
+        };
 
         self.run_with_args(cmd_args)?;
 
@@ -423,17 +429,27 @@ pub use self::{}::*;
                 }
             }
 
-            let mod_rs_path = format!("{}/mod.rs", out_dir);
             let new_content = mod_rs_snippets.concat();
 
-            // Only write if content has changed
-            if let Ok(existing_content) = std::fs::read_to_string(&mod_rs_path) {
-                if existing_content != new_content {
-                    _ = std::fs::write(&mod_rs_path, new_content);
-                }
+            let content_not_changed = if let Some(ref original_content) = original_mod_rs {
+                original_content == &new_content
             } else {
-                // File doesn't exist, write it
-                _ = std::fs::write(&mod_rs_path, new_content);
+                false
+            };
+
+            // Since flatc always writes to the file, we need to write it again to correct the content
+            _ = std::fs::write(&mod_rs_path, new_content);
+
+            if content_not_changed {
+                if let Some(ref original_meta) = original_metadata {
+                    // Content is identical, restore original metadata to avoid unnecessary rebuilds
+                    if let Ok(original_time) = original_meta.modified() {
+                        let _ = filetime::set_file_mtime(
+                            &mod_rs_path,
+                            FileTime::from_system_time(original_time),
+                        );
+                    }
+                }
             }
         }
 

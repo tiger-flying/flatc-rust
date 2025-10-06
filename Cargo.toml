@@ -10,14 +10,26 @@ description = "FlatBuffers flatc command as API"
 documentation = "https://docs.rs/flatc-rust/*/flatc-rust"
 readme = "README.md"
 keywords = ["flatbuffers", "flatc", "compiler", "code-generation"]
-categories = ["development-tools::build-utils", "development-tools", "api-bindings", "parser-implementations"]
-include = ["/src/**/*", "/Cargo.toml", "/LICENSE-MIT", "/LICENSE-APACHE", "/README.md"]
+categories = [
+    "development-tools::build-utils",
+    "development-tools",
+    "api-bindings",
+    "parser-implementations",
+]
+include = [
+    "/src/**/*",
+    "/Cargo.toml",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+    "/README.md",
+]
 
 [badges]
 travis-ci = { repository = "frol/flatc-rust" }
 
 [dependencies]
 log = ">=0.4.4"
+filetime = "0.2"
 
 [dev-dependencies]
 tempfile = "3.0.5"
